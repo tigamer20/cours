@@ -1,0 +1,12 @@
+schema: "classroom50/repo-config/v1"
+classroom: "structures-de-donnees-dans-les-jeux-gr-4219"
+assignment: "vecteur"
+owner:
+  username: "antho-boucher"
+  id: 319485312
+  accepted_at: "2026-08-31T22:48:34Z"
+source:
+  owner: "420-316-SH"
+  owner_id: 142702825
+  repo: "lab03-vecteur"
+  branch: "main"
