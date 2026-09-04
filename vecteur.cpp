@@ -6,6 +6,8 @@ using namespace std;
 // mesure que vous avancez votre laboratoire sur le vecteur.
 
 vecteur::vecteur() {
+        _dim = 0;
+        _tab = nullptr;
 
 }
 
@@ -14,5 +16,6 @@ vecteur::vecteur(int dim) {
 }
 
 vecteur::~vecteur() {
-
+        if (_tab != nullptr)
+            delete[] _tab;
 }
