@@ -34,3 +34,14 @@ vecteur::vecteur(const vecteur& source) {
         _tab = nullptr;	// La source est vide, donc la copie l'est aussi
     }
 }
+
+void vecteur::print(ostream& output) const {
+    for (int i = 0; i < _dim; i++) {
+        output << *(_tab + i) << ' ';
+    }
+}
+
+ostream& operator<<(ostream& output, const vecteur& v) {
+    v.print(output);
+    return output;
+}

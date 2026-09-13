@@ -25,12 +25,12 @@ int main() {
 	/* votre propre vecteur.                                              */
 	/**********************************************************************/
 
-	/*
+	
 	
 	vecteur v4(v1);				// Copie du vecteur vide (copieur)
 	vecteur v5(v2);				// Copie du vecteur de 5 éléments
 
-	// vecteur erreur(-1);		// Assert taille < 0, décommenter pour tester
+	 vecteur erreur(-1);		// Assert taille < 0, décommenter pour tester
 
 	cout << endl
 		<< "Déclarations" << endl << endl
@@ -40,8 +40,8 @@ int main() {
 		<< "vecteur <int> v4(v1);	// Copie du vecteur vide (copieur)" << endl
 		<< "vecteur <int> v5(v2);	// Copie du vecteur de 5 éléments" << endl << endl;
 
-	// Étape 3 : Test de print() et de l'opérateur <<
-	// comme le print est appelé par operator<<, je teste que l'opérateur
+	 //Étape 3 : Test de print() et de l'opérateur <<
+	 //comme le print est appelé par operator<<, je teste que l'opérateur
 	cout << endl
 		<< "Étape 1,2 et 3 :Test constructeurs, print() et de l'opérateur <<" << endl << endl
 		<< setw(20) << "v1 : " << v1 << endl
@@ -51,6 +51,7 @@ int main() {
 		<< setw(20) << "v5 : " << v5 << endl << endl;
 	system("pause");
 
+	/*
 	// Étape 4 : Test de push_back()
 	system("cls");
 	cout << endl

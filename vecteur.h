@@ -1,4 +1,7 @@
 #pragma once // Evite que ce fichier soit inclus plusieurs fois dans une meme compilation
+#include <fstream>
+
+using namespace std;
 
 class vecteur {
 	private:
@@ -13,4 +16,9 @@ class vecteur {
 
 		// Ajoutez des méthodes ici au fur et à mesure que
 		// vous avancez votre laboratoire sur le vecteur.
+		void print(ostream& output) const;	// const : garantit que print() ne modifie pas le vecteur
+
+
 };
+
+ostream& operator<<(ostream& output, const vecteur& v);
