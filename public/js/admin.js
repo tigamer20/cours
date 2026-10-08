@@ -154,7 +154,8 @@ export async function adminUsersPage(el, _p, filters = { role: '', q: '' }) {
             <td class="small">${u.last_login_at ? fmtDateTime(u.last_login_at) : 'Jamais'}</td>
             <td class="right"><div class="actions" style="justify-content:flex-end">
               ${u.role === 'etudiant' ? html`<a class="btn small" href="#/etudiants/${u.id}">Dossier</a>` : ''}
-              <button class="small" data-edit="${u.id}">Modifier</button></div></td></tr>`,
+              <button class="small" data-edit="${u.id}">Modifier</button>
+              ${u.role === 'etudiant' ? html`<button class="small danger" data-delete="${u.id}">Supprimer</button>` : ''}</div></td></tr>`,
         )}</tbody></table></div></div>`,
   );
   let timer;
@@ -197,6 +198,27 @@ export async function adminUsersPage(el, _p, filters = { role: '', q: '' }) {
       },
     });
     wireUserForm(m);
+  });
+  on(el, 'click', '[data-delete]', (b) => {
+    const u = users.find((x) => x.id === Number(b.dataset.delete));
+    const m = modal({
+      title: `Supprimer le compte de ${fullName(u)}`,
+      submitLabel: 'Supprimer définitivement',
+      body: html`
+        <div class="alert error">Cette action est <strong>irréversible</strong>. Seront effacés : le compte, les inscriptions,
+          les notes, les remises de travaux (et leurs fichiers), les présences, les consultations de documents et les messages de l’étudiant.</div>
+        <p class="small muted">Pour seulement bloquer l’accès en conservant l’historique, utilisez plutôt « Modifier » → décocher « Compte actif ».</p>
+        <div class="field"><label>Pour confirmer, tapez le courriel de l’étudiant : <strong>${u.email}</strong></label>
+          <input name="confirm_email" autocomplete="off" spellcheck="false" required></div>`,
+      onSubmit: async (form) => {
+        const { confirm_email } = formData(form);
+        if (confirm_email.trim().toLowerCase() !== u.email.toLowerCase()) throw new Error('Le courriel tapé ne correspond pas.');
+        await api(`/api/users/${u.id}`, { method: 'DELETE', body: { confirm_email } });
+        toast(`Compte de ${fullName(u)} supprimé.`);
+        reload();
+      },
+    });
+    $('button[type="submit"]', m.el).classList.replace('primary', 'danger');
   });
 }
 

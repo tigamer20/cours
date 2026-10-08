@@ -332,4 +332,31 @@ test(`${label} — gros fichier stocké en morceaux dans la base et relu à l’
   assert.equal(got.length, big.length);
   assert.ok(got.equals(big));
 });
+
+test(`${label} — suppression d’un compte étudiant par l’admin`, async () => {
+  const email = 'a-supprimer@ecole.test';
+  const created = (await admin.post('/api/users', { email, password: PASSWORD, role: 'etudiant', first_name: 'Temp', last_name: 'Orary' })).data;
+  await admin.post('/api/courses/1/students', { student_ids: [created.id] });
+  const temp = await login(email);
+  const ev = (await prof.post('/api/courses/1/evaluations', { title: 'Avant suppression', weight: 1, accepts_submissions: true })).data;
+  const sub = (await temp.post(`/api/evaluations/${ev.id}/submissions`, Buffer.from('travail'), { 'X-File-Name': 'travail.txt' })).data;
+  await prof.put(`/api/evaluations/${ev.id}/grades`, { grades: [{ student_id: created.id, score: 80 }] });
+  await temp.post('/api/messages', { recipient_ids: [(await prof.get('/api/me')).data.id], subject: 'Bonjour', body: 'x' });
+
+  // Only admins, only students, and only with the exact email as confirmation.
+  assert.equal((await prof.req('DELETE', `/api/users/${created.id}`, { confirm_email: email })).status, 403);
+  assert.equal((await admin.req('DELETE', `/api/users/${created.id}`, { confirm_email: 'autre@ecole.test' })).status, 400);
+  const teacherId = (await prof.get('/api/me')).data.id;
+  assert.equal((await admin.req('DELETE', `/api/users/${teacherId}`, { confirm_email: 'prof.tremblay@ecole.test' })).status, 400);
+
+  assert.equal((await admin.req('DELETE', `/api/users/${created.id}`, { confirm_email: email.toUpperCase() })).status, 200);
+  assert.equal((await new Client().post('/api/login', { email, password: PASSWORD })).status, 401);
+  assert.equal((await temp.get('/api/me')).status, 401, 'sessions supprimées');
+  assert.ok(!(await prof.get('/api/courses/1/students')).data.some((s) => s.id === created.id));
+  assert.ok(!(await prof.get(`/api/evaluations/${ev.id}/grades`)).data.students.some((s) => s.id === created.id));
+  assert.equal((await prof.get(`/api/submissions/${sub.id}/file`)).status, 404);
+  assert.ok(!(await prof.get('/api/messages')).data.some((m) => m.subject === 'Bonjour'));
+  assert.equal((await admin.req('DELETE', `/api/users/${created.id}`, { confirm_email: email })).status, 404);
+  assert.ok((await admin.get('/api/admin/audit?q=compte%20%C3%A9tudiant%20supprim%C3%A9')).data.length >= 1);
+});
 }

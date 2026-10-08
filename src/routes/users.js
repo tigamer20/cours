@@ -1,4 +1,4 @@
-import { one, all, run, audit, getSettings } from '../db.js';
+import { one, all, run, batch, audit, getSettings } from '../db.js';
 import { fail, readJson, str, oneOf, clientIp } from '../http.js';
 import {
   hashPassword,
@@ -188,6 +188,29 @@ export default function register(r) {
     if (b.password || b.active === false || (b.role !== undefined && b.role !== target.role)) await destroyUserSessions(target.id);
     audit(user.id, 'compte modifié', `${target.email} (${Object.keys(b).filter((k) => k !== 'password').join(', ')}${b.password ? ', mot de passe' : ''})`);
     return one(`SELECT ${PUBLIC_FIELDS} FROM users WHERE id = ?`, target.id);
+  });
+
+  // Permanent deletion, students only: staff accounts are deactivated instead so their
+  // courses, grades and documents keep an author. The admin must retype the email.
+  r.delete('/api/users/:id', async ({ req, user, params }) => {
+    requireRole(user, 'admin');
+    const target = await one('SELECT id, email, role, first_name, last_name, student_number FROM users WHERE id = ?', params.id);
+    if (!target) fail(404, 'Utilisateur introuvable.');
+    if (target.role !== 'etudiant') fail(400, 'Seuls les comptes étudiants peuvent être supprimés. Désactivez plutôt ce compte.');
+    const b = await readJson(req);
+    if (String(b.confirm_email || '').trim().toLowerCase() !== target.email.toLowerCase()) {
+      fail(400, 'Confirmation invalide : retapez le courriel exact de l’étudiant.');
+    }
+    // Files the student submitted are not referenced by anything else once the account is gone.
+    const files = await all('SELECT file_id FROM submissions WHERE student_id = ?', target.id);
+    const fileIds = files.map((f) => f.file_id);
+    await batch([
+      // Grades, submissions, attendance, enrollments, views, messages and sessions follow via ON DELETE CASCADE.
+      ['DELETE FROM users WHERE id = ?', [target.id]],
+      ...(fileIds.length ? [[`DELETE FROM files WHERE id IN (${fileIds.map(() => '?').join(',')})`, fileIds]] : []),
+    ]);
+    audit(user.id, 'compte étudiant supprimé', `${target.first_name} ${target.last_name} (${target.email}${target.student_number ? `, ${target.student_number}` : ''})`);
+    return { ok: true };
   });
 
   r.get('/api/contacts', ({ user }) => {
