@@ -1,0 +1,32 @@
+# Blueprint Render : https://render.com/docs/blueprint-spec
+# Dashboard Render → New → Blueprint → choisir ce dépôt. Voir README.md, section « Déploiement sur Render ».
+services:
+  - type: web
+    name: ecole-en-ligne
+    runtime: node
+    # Un disque persistant exige une instance payante (Starter ou plus).
+    # Sur le plan Free, il n'y a pas de disque : la base et les fichiers sont effacés à chaque redéploiement/redémarrage.
+    plan: starter
+    region: oregon
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "24"
+      - key: DATA_DIR
+        value: /var/data
+      - key: MAX_UPLOAD_MB
+        value: "25"
+      # Premier compte administrateur, créé au premier démarrage (base vide). Render vous demandera les valeurs.
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+    disk:
+      name: ecole-data
+      mountPath: /var/data
+      sizeGB: 1

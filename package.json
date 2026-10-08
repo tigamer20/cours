@@ -1,0 +1,16 @@
+{
+  "name": "ecole",
+  "version": "1.0.0",
+  "description": "Système de gestion scolaire : cours, horaire, notes, absences, documents, calendrier et messagerie.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "reset": "node scripts/reset.js",
+    "test": "node --test"
+  }
+}
