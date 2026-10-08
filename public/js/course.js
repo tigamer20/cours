@@ -1,32 +1,54 @@
 import {
   state, api, qs, html, render, fresh, $, $$, on, formData, toast, toastError, modal, confirmDialog, openViewer,
   fullName, courseLabel, courseColor, fmtDate, fmtDateTime, fmtRelative, fmtShortDate, toLocalInput, fromLocalInput,
-  todayStr, fileSize, pct, gradeBadge, KIND_LABEL, STATUS_LABEL, STATUS_COLOR, DAYS,
+  todayStr, fileSize, pct, gradeBadge, KIND_LABEL, STATUS_LABEL, STATUS_COLOR, DAYS, icon, avatar, emptyState,
 } from './core.js';
 import { composeMessage } from './pages.js';
 
 // ---------- Liste des cours ----------
 
 export async function coursesPage(el) {
+  el = fresh(el);
   const courses = await api('/api/courses');
+  state.courses = courses;
   const isAdmin = state.me.role === 'admin';
+  const teacherOf = (c) => (c.teacher_first_name ? { first_name: c.teacher_first_name, last_name: c.teacher_last_name } : null);
   render(
     el,
     html`
       <div class="page-head">
         <div><h1>${isAdmin ? 'Tous les cours' : 'Mes cours'}</h1><p class="muted">${courses.length} cours</p></div>
-        ${isAdmin ? html`<a class="btn primary" href="#/admin/cours">Gérer les cours</a>` : ''}
+        <div class="actions">
+          ${courses.length > 3 ? html`<div class="input-icon">${icon('search')}<input type="search" id="course-q" placeholder="Filtrer les cours…"></div>` : ''}
+          ${isAdmin ? html`<a class="btn primary" href="#/admin/cours">${icon('layers')}Gérer les cours</a>` : ''}
+        </div>
       </div>
       ${courses.length
-        ? html`<div class="grid cols-3">${courses.map(
-            (c) => html`<a class="card course-card" href="#/cours/${c.id}" style="border-top-color:${courseColor(c.id)}">
-              <div class="code">${courseLabel(c)} · ${c.term}</div>
-              <h3 style="margin:.3rem 0 .4rem">${c.name}</h3>
-              <div class="muted small">${c.teacher_first_name ? `${c.teacher_first_name} ${c.teacher_last_name}` : 'Enseignant à déterminer'} · ${c.student_count} étudiant(s)</div>
-            </a>`,
-          )}</div>`
-        : html`<div class="card empty">Aucun cours pour le moment.</div>`}`,
+        ? html`<div class="grid course-grid stagger">${courses.map((c, i) => {
+            const t = teacherOf(c);
+            return html`<a class="card course-card" href="#/cours/${c.id}" style="--c:${courseColor(c)};--i:${i}" data-q="${`${c.code} ${c.name} ${c.term} ${t ? fullName(t) : ''}`.toLowerCase()}">
+              <div class="banner">
+                <div class="code">${courseLabel(c)}</div>
+                <div class="term">${c.term}</div>
+                <span class="banner-icon">${icon('book')}</span>
+              </div>
+              <div class="body">
+                <h3>${c.name}</h3>
+                ${c.description ? html`<p class="muted small clamp">${c.description}</p>` : ''}
+                <div class="meta">
+                  ${t ? html`${avatar(t, 'sm')}<span>${fullName(t)}</span>` : html`<span>Enseignant à déterminer</span>`}
+                  <span class="spacer"></span>
+                  <span class="badge">${icon('users')}${c.student_count}</span>
+                </div>
+              </div>
+            </a>`;
+          })}</div>`
+        : html`<div class="card">${emptyState('Aucun cours pour le moment.', 'book')}</div>`}`,
   );
+  $('#course-q', el)?.addEventListener('input', (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    $$('.course-card', el).forEach((card) => card.classList.toggle('hidden', !card.dataset.q.includes(q)));
+  });
 }
 
 // ---------- Page d'un cours ----------
