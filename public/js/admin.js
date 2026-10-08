@@ -267,3 +267,27 @@ export async function adminCoursesPage(el) {
     reload();
   });
 }
+
+// ---------- Établissement (nom, slogan, couleur par défaut) ----------
+
+export async function schoolSettingsPage(el) {
+  el = fresh(el);
+  const s = await api('/api/settings');
+  render(
+    el,
+    html`
+      <div class="page-head"><div><h1>Établissement</h1><p class="muted">Nom, slogan et couleur affichés à tous, y compris sur la page de connexion.</p></div></div>
+      <form class="card" id="school-form" style="max-width:720px">
+        <div class="field"><label>Nom de l’établissement</label><input name="school_name" value="${s.school_name}" maxlength="120" placeholder="ex. Cégep de Sherbrooke"></div>
+        <div class="field"><label>Slogan (page de connexion)</label><input name="tagline" value="${s.tagline}" maxlength="160"></div>
+        <div class="field"><label>Message sur la page de connexion (optionnel)</label><textarea name="login_message" rows="3" maxlength="500">${s.login_message}</textarea></div>
+        <div class="field"><label>Couleur par défaut (les utilisateurs peuvent choisir la leur)</label><input type="color" name="accent" value="${s.accent}"></div>
+        <button type="submit" class="primary">Enregistrer</button>
+      </form>`,
+  );
+  $('#school-form', el).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await api('/api/settings', { method: 'PUT', body: formData(e.target) });
+    toast('Paramètres enregistrés. Rechargez la page pour voir le nouveau nom partout.');
+  });
+}

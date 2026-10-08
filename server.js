@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { HttpError, Router, sendJson } from './src/http.js';
 import { userFromRequest, purgeExpiredSessions } from './src/auth.js';
 import { bootstrap } from './src/seed.js';
+import { openDb, isRemoteDb } from './src/db.js';
+import { processDocumentNotifications } from './src/routes/coursework.js';
 import registerUsers from './src/routes/users.js';
 import registerCourses from './src/routes/courses.js';
 import registerCoursework from './src/routes/coursework.js';
@@ -13,7 +15,7 @@ import registerGeneral from './src/routes/general.js';
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
-const PUBLIC_ROUTES = new Set(['POST /api/login', 'GET /api/health']);
+const PUBLIC_ROUTES = new Set(['POST /api/login', 'GET /api/health', 'GET /api/settings']);
 
 const router = new Router();
 router.get('/api/health', () => ({ ok: true }));
@@ -68,7 +70,7 @@ async function handleApi(req, res, url) {
     throw new HttpError(403, 'Requête refusée.');
   }
 
-  const user = userFromRequest(req);
+  const user = await userFromRequest(req);
   if (!user && !PUBLIC_ROUTES.has(`${req.method} ${url.pathname}`)) {
     throw new HttpError(401, 'Veuillez vous connecter.');
   }
@@ -98,10 +100,26 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-bootstrap();
-purgeExpiredSessions();
-setInterval(purgeExpiredSessions, 3600_000).unref();
+const dbName = await openDb();
+console.log(`Base de données : ${dbName}`);
+if (!isRemoteDb() && process.env.NODE_ENV === 'production') {
+  console.warn('ATTENTION : DATABASE_URL absent. Sur Render (plan gratuit), les données seront PERDUES à chaque redémarrage.');
+}
+await bootstrap();
+await purgeExpiredSessions();
+setInterval(() => purgeExpiredSessions().catch(() => {}), 3600_000).unref();
+// Scheduled document publications: notify students when the publication date passes.
+processDocumentNotifications();
+setInterval(processDocumentNotifications, 60_000).unref();
 
 server.listen(PORT, HOST, () => {
-  console.log(`École en ligne : http://localhost:${PORT}`);
+  console.log(`Cartable : http://localhost:${PORT}`);
 });
+
+// Render sends SIGTERM before stopping the instance: finish in-flight requests, then exit.
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.on(signal, () => {
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 5000).unref();
+  });
+}

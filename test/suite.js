@@ -1,4 +1,5 @@
-// Tests de bout en bout de l'API (lance un serveur sur une base temporaire avec les données de démo).
+// Suite de tests de bout en bout de l'API, exécutée contre la base locale (api.test.js)
+// et contre le pilote Turso en ligne via un faux serveur Turso (turso.test.js).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -6,11 +7,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const PORT = 3900 + Math.floor(Math.random() * 90);
-const BASE = `http://localhost:${PORT}`;
-const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ecole-test-'));
 const PASSWORD = 'demo12345';
-let server;
+let PORT, BASE, DATA_DIR, server;
 
 class Client {
   constructor() {
@@ -52,12 +50,20 @@ async function login(email) {
 
 let admin, prof, otherProf, student, outsider;
 
+export function defineSuite(label, getExtraEnv = async () => ({}), cleanup = () => {}) {
 before(async () => {
+  PORT = 3800 + Math.floor(Math.random() * 190);
+  BASE = `http://localhost:${PORT}`;
+  DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cartable-test-'));
+  const extra = await getExtraEnv();
   server = spawn(process.execPath, ['server.js'], {
-    env: { ...process.env, PORT: String(PORT), DATA_DIR, NODE_ENV: 'test', SEED_DEMO: 'true' },
-    stdio: 'pipe',
+    env: { ...process.env, DATABASE_URL: '', DATABASE_TOKEN: '', PORT: String(PORT), DATA_DIR, NODE_ENV: 'test', SEED_DEMO: 'true', ...extra },
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
-  for (let i = 0; i < 50; i++) {
+  let logs = '';
+  server.stdout.on('data', (d) => (logs += d));
+  server.stderr.on('data', (d) => (logs += d));
+  for (let i = 0; i < 100; i++) {
     try {
       if ((await fetch(`${BASE}/api/health`)).ok) break;
     } catch {
@@ -65,6 +71,7 @@ before(async () => {
     }
     await new Promise((r) => setTimeout(r, 100));
   }
+  if (!logs.includes('Base de données')) console.log(logs);
   admin = await login('admin@ecole.test');
   prof = await login('prof.tremblay@ecole.test'); // cours 1 et 3
   otherProf = await login('prof.roy@ecole.test'); // cours 2
@@ -80,19 +87,20 @@ after(async () => {
   }
   // Windows may keep the SQLite file locked for a moment after the process exits.
   fs.rmSync(DATA_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  cleanup();
 });
 
-test('authentification requise et mauvais mot de passe refusé', async () => {
+test(`${label} — authentification requise et mauvais mot de passe refusé`, async () => {
   assert.equal((await new Client().get('/api/courses')).status, 401);
   assert.equal((await new Client().post('/api/login', { email: 'admin@ecole.test', password: 'mauvais' })).status, 401);
 });
 
-test('les requêtes sans en-tête X-Requested-With sont refusées (CSRF)', async () => {
+test(`${label} — les requêtes sans en-tête X-Requested-With sont refusées (CSRF)`, async () => {
   const r = await fetch(`${BASE}/api/logout`, { method: 'POST', headers: { Cookie: admin.cookie } });
   assert.equal(r.status, 403);
 });
 
-test('chaque rôle ne voit que ses cours', async () => {
+test(`${label} — chaque rôle ne voit que ses cours`, async () => {
   assert.equal((await admin.get('/api/courses')).data.length, 3);
   assert.deepEqual((await prof.get('/api/courses')).data.map((c) => c.id).sort(), [1, 3]);
   assert.deepEqual((await outsider.get('/api/courses')).data.map((c) => c.id).sort(), [1, 2]);
@@ -100,7 +108,7 @@ test('chaque rôle ne voit que ses cours', async () => {
   assert.equal((await otherProf.get('/api/courses/1/students')).status, 403);
 });
 
-test('seul un admin crée des comptes, de tous les rôles', async () => {
+test(`${label} — seul un admin crée des comptes, de tous les rôles`, async () => {
   assert.equal((await prof.post('/api/users', { email: 'x@ecole.test', password: 'motdepasse', role: 'etudiant', first_name: 'X', last_name: 'Y' })).status, 403);
   for (const role of ['etudiant', 'enseignant', 'admin']) {
     const r = await admin.post('/api/users', { email: `nouveau-${role}@ecole.test`, password: 'motdepasse1', role, first_name: 'Nouveau', last_name: role });
@@ -111,14 +119,14 @@ test('seul un admin crée des comptes, de tous les rôles', async () => {
   assert.equal((await admin.post('/api/users', { email: 'nouveau-admin@ecole.test', password: 'motdepasse1', role: 'admin', first_name: 'A', last_name: 'B' })).status, 409);
 });
 
-test('un compte désactivé ne peut plus se connecter', async () => {
+test(`${label} — un compte désactivé ne peut plus se connecter`, async () => {
   const created = await admin.post('/api/users', { email: 'desactive@ecole.test', password: 'motdepasse1', role: 'etudiant', first_name: 'D', last_name: 'E' });
   await admin.patch(`/api/users/${created.data.id}`, { active: false });
   const r = await new Client().post('/api/login', { email: 'desactive@ecole.test', password: 'motdepasse1' });
   assert.equal(r.status, 403);
 });
 
-test('plan d’évaluation, remise, correction et publication des notes', async () => {
+test(`${label} — plan d’évaluation, remise, correction et publication des notes`, async () => {
   const ev = await prof.post('/api/courses/3/evaluations', {
     title: 'Test remise', kind: 'travail', weight: 10, max_score: 20, due_at: new Date(Date.now() + 86400_000).toISOString(),
     accepts_submissions: true, grades_published: false,
@@ -151,7 +159,7 @@ test('plan d’évaluation, remise, correction et publication des notes', async 
   assert.equal(mine.my_comment, 'Bien');
 });
 
-test('documents : consultation suivie par l’enseignant', async () => {
+test(`${label} — documents : consultation suivie par l’enseignant`, async () => {
   const docs = (await student.get('/api/courses/1/documents')).data;
   const doc = docs.find((d) => d.title === 'Énoncé — Lab 3');
   assert.equal(doc.first_viewed_at, null);
@@ -165,7 +173,7 @@ test('documents : consultation suivie par l’enseignant', async () => {
   assert.equal((await student.get(`/api/documents/${doc.id}/views`)).status, 403);
 });
 
-test('les fichiers non sûrs sont toujours téléchargés, jamais affichés', async () => {
+test(`${label} — les fichiers non sûrs sont toujours téléchargés, jamais affichés`, async () => {
   const up = await prof.post('/api/courses/1/documents?title=html', Buffer.from('<script>alert(1)</script>'), { 'X-File-Name': 'page.html' });
   assert.equal(up.status, 200);
   const file = await student.get(`/api/documents/${up.data.id}/file?mode=view`);
@@ -173,7 +181,7 @@ test('les fichiers non sûrs sont toujours téléchargés, jamais affichés', as
   assert.equal(file.headers.get('content-type'), 'application/octet-stream');
 });
 
-test('présences et dossier étudiant', async () => {
+test(`${label} — présences et dossier étudiant`, async () => {
   const me = (await student.get('/api/me')).data;
   const date = '2026-09-01';
   assert.equal((await prof.put('/api/courses/3/attendance', { date, records: [{ student_id: me.id, status: 'absent', note: 'malade' }] })).status, 200);
@@ -188,7 +196,7 @@ test('présences et dossier étudiant', async () => {
   assert.equal((await admin.get(`/api/students/${me.id}/dossier`)).data.courses.length, 3);
 });
 
-test('messagerie : destinataires autorisés et envoi au groupe', async () => {
+test(`${label} — messagerie : destinataires autorisés et envoi au groupe`, async () => {
   const me = (await student.get('/api/me')).data;
   const outsiderMe = (await outsider.get('/api/me')).data;
   assert.equal((await student.post('/api/messages', { recipient_ids: [outsiderMe.id], subject: 's', body: 'b' })).status, 403, 'étudiant → étudiant interdit');
@@ -203,7 +211,7 @@ test('messagerie : destinataires autorisés et envoi au groupe', async () => {
   assert.ok(me.id);
 });
 
-test('calendrier : seuls les enseignants du cours et les admins ajoutent des événements', async () => {
+test(`${label} — calendrier : seuls les enseignants du cours et les admins ajoutent des événements`, async () => {
   const at = new Date(Date.now() + 3 * 86400_000).toISOString();
   assert.equal((await student.post('/api/events', { course_id: 1, title: 'x', starts_at: at })).status, 403);
   assert.equal((await otherProf.post('/api/events', { course_id: 1, title: 'x', starts_at: at })).status, 403);
@@ -215,8 +223,113 @@ test('calendrier : seuls les enseignants du cours et les admins ajoutent des év
   assert.ok(items.some((i) => i.title === 'Révision'));
 });
 
-test('journal d’activité réservé aux admins', async () => {
+test(`${label} — journal d’activité réservé aux admins`, async () => {
   assert.equal((await prof.get('/api/admin/audit')).status, 403);
   const log = (await admin.get('/api/admin/audit?q=travail%20remis')).data;
   assert.ok(log.length >= 1);
 });
+
+test(`${label} — paramètres de l’établissement : lecture publique, modification admin`, async () => {
+  assert.equal((await new Client().get('/api/settings')).status, 200);
+  assert.equal((await prof.req('PUT', '/api/settings', { school_name: 'X' })).status, 403);
+  assert.equal((await admin.req('PUT', '/api/settings', { school_name: 'Cégep Test', accent: '#ff0066' })).status, 200);
+  const s = (await new Client().get('/api/settings')).data;
+  assert.equal(s.school_name, 'Cégep Test');
+  assert.equal(s.accent, '#ff0066');
+});
+
+test(`${label} — préférences d’interface enregistrées et validées`, async () => {
+  const r = await student.req('PUT', '/api/me/preferences', { theme: 'dark', accent: '#10b981', density: 'compact', bogus: 'x' });
+  assert.deepEqual(r.data, { theme: 'dark', accent: '#10b981', density: 'compact' });
+  assert.equal((await student.get('/api/me')).data.preferences.theme, 'dark');
+  assert.equal((await student.req('PUT', '/api/me/preferences', { accent: 'red;}' })).data.accent, undefined);
+});
+
+const upload = (client, course, params, name = 'doc.pdf', bytes = Buffer.from('%PDF-1.4\n%%EOF\n')) =>
+  client.post(`/api/courses/${course}/documents?${new URLSearchParams(params)}`, bytes, { 'X-File-Name': encodeURIComponent(name) });
+const studentDocs = async (client, course) => (await client.get(`/api/courses/${course}/documents`)).data.map((d) => d.title);
+
+test(`${label} — règles de publication : brouillon, programmé, expiré`, async () => {
+  const up = await upload(prof, 1, { title: 'Brouillon secret', status: 'draft' });
+  assert.equal(up.status, 200);
+  const id = up.data.id;
+  assert.ok(!(await studentDocs(student, 1)).includes('Brouillon secret'));
+  assert.equal((await student.get(`/api/documents/${id}/file`)).status, 404);
+
+  const future = new Date(Date.now() + 86400_000).toISOString();
+  assert.equal((await prof.patch(`/api/documents/${id}`, { status: 'published', publish_at: future })).status, 200);
+  assert.ok(!(await studentDocs(student, 1)).includes('Brouillon secret'), 'programmé : encore caché');
+  const teacherView = (await prof.get('/api/courses/1/documents')).data.find((d) => d.id === id);
+  assert.equal(teacherView.state, 'programme');
+
+  await prof.patch(`/api/documents/${id}`, { publish_at: null });
+  assert.ok((await studentDocs(student, 1)).includes('Brouillon secret'), 'publié : visible');
+
+  await prof.patch(`/api/documents/${id}`, { available_until: new Date(Date.now() - 1000).toISOString() });
+  assert.ok(!(await studentDocs(student, 1)).includes('Brouillon secret'), 'expiré : caché');
+  assert.equal((await prof.patch(`/api/documents/${id}`, { publish_at: future, available_until: new Date().toISOString() })).status, 400);
+  assert.equal((await otherProf.patch(`/api/documents/${id}`, { status: 'draft' })).status, 403);
+});
+
+test(`${label} — règles de publication : destinataires choisis`, async () => {
+  const me = (await student.get('/api/me')).data;
+  const up = await upload(prof, 1, { title: 'Pour Léa seulement', audience: 'selected', student_ids: String(me.id) });
+  assert.equal(up.status, 200);
+  assert.ok((await studentDocs(student, 1)).includes('Pour Léa seulement'));
+  assert.ok(!(await studentDocs(outsider, 1)).includes('Pour Léa seulement'));
+  assert.equal((await outsider.get(`/api/documents/${up.data.id}/file`)).status, 404);
+  const views = (await prof.get(`/api/documents/${up.data.id}/views`)).data;
+  assert.deepEqual(views.map((v) => v.id), [me.id]);
+  assert.equal((await upload(prof, 1, { title: 'x', audience: 'selected' })).status, 400, 'aucun destinataire');
+});
+
+test(`${label} — règles de publication : consultation seulement et confirmation de lecture`, async () => {
+  const up = await upload(prof, 1, { title: 'Corrigé protégé', allow_download: '0', require_ack: '1' });
+  const id = up.data.id;
+  const view = await student.get(`/api/documents/${id}/file?mode=view`);
+  assert.equal(view.status, 200);
+  assert.match(view.headers.get('content-disposition'), /^inline/);
+  assert.equal((await student.get(`/api/documents/${id}/file?mode=download`)).status, 403);
+  assert.equal((await prof.get(`/api/documents/${id}/file?mode=download`)).status, 200, 'l’enseignant peut toujours télécharger');
+
+  const before = (await student.get('/api/dashboard')).data.to_acknowledge.map((d) => d.id);
+  assert.ok(before.includes(id));
+  assert.equal((await student.post(`/api/documents/${id}/ack`)).status, 200);
+  const after = (await student.get('/api/dashboard')).data.to_acknowledge.map((d) => d.id);
+  assert.ok(!after.includes(id));
+  const me = (await student.get('/api/me')).data;
+  assert.ok((await prof.get(`/api/documents/${id}/views`)).data.find((v) => v.id === me.id).acknowledged_at);
+});
+
+test(`${label} — règles de publication : avis automatique aux étudiants`, async () => {
+  await upload(prof, 3, { title: 'Nouveau devoir', notify: '1' });
+  let found;
+  for (let i = 0; i < 40 && !found; i++) {
+    found = (await student.get('/api/messages')).data.find((m) => m.subject === 'Nouveau document : Nouveau devoir');
+    if (!found) await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.ok(found, 'message reçu');
+  assert.ok(!(await outsider.get('/api/messages')).data.some((m) => m.subject === 'Nouveau document : Nouveau devoir'), 'pas inscrit au cours 3');
+});
+
+test(`${label} — règles par défaut du cours appliquées aux nouveaux documents`, async () => {
+  assert.equal((await prof.patch('/api/courses/3', { document_rules: { start_as_draft: true, allow_download: false, default_category: 'Semaine 1' } })).status, 200);
+  const up = await upload(prof, 3, { title: 'Selon les règles' });
+  const d = (await prof.get('/api/courses/3/documents')).data.find((x) => x.id === up.data.id);
+  assert.equal(d.status, 'draft');
+  assert.equal(d.allow_download, 0);
+  assert.equal(d.category, 'Semaine 1');
+  assert.equal((await otherProf.patch('/api/courses/3', { document_rules: {} })).status, 403);
+});
+
+test(`${label} — gros fichier stocké en morceaux dans la base et relu à l’identique`, async () => {
+  const big = Buffer.alloc(700 * 1024);
+  for (let i = 0; i < big.length; i++) big[i] = (i * 31) % 251;
+  const up = await upload(prof, 1, { title: 'Gros fichier' }, 'gros.zip', big);
+  assert.equal(up.status, 200);
+  const res = await fetch(`${BASE}/api/documents/${up.data.id}/file?mode=download`, { headers: { Cookie: student.cookie } });
+  const got = Buffer.from(await res.arrayBuffer());
+  assert.equal(got.length, big.length);
+  assert.ok(got.equals(big));
+});
+}

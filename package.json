@@ -11,6 +11,6 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "reset": "node scripts/reset.js",
-    "test": "node --test"
+    "test": "node --test test/*.test.js"
   }
 }

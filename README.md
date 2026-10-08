@@ -1,9 +1,10 @@
-# École en ligne
+# Cartable
 
-Plateforme de gestion scolaire : cours, horaire, plan d’évaluation, remise de travaux, notes, absences, documents de cours, calendrier, messagerie et dossiers étudiants, avec trois types de comptes (administrateur, enseignant, étudiant).
+Plateforme scolaire moderne : cours, horaire, plan d’évaluation, remise de travaux, notes, absences, documents de cours (avec règles de publication), calendrier, messagerie et dossiers étudiants. Trois types de comptes : administrateur, enseignant, étudiant.
 
-- **Aucune dépendance npm.** Tout repose sur Node.js 24 : `node:sqlite` pour la base de données, `crypto.scrypt` pour les mots de passe et `node:http` pour le serveur. Il n’y a pas de bibliothèque tierce à auditer ou à mettre à jour.
-- Le frontend est en JavaScript natif (modules ES), sans étape de build.
+- **100 % gratuit à héberger** : Render (plan gratuit) + base de données en ligne Turso (plan gratuit).
+- **Aucune dépendance npm.** Node.js 24 seulement : `node:sqlite` en local, l’API HTTP de Turso en ligne, `crypto.scrypt` pour les mots de passe. Rien de tiers à auditer.
+- Interface personnalisable par chaque utilisateur : thème clair/sombre/auto, couleur d’accent, densité, taille du texte, coins, arrière-plan, menu réduit, animations. Recherche rapide avec **Ctrl + K**.
 
 ---
 
@@ -14,16 +15,29 @@ Plateforme de gestion scolaire : cours, horaire, plan d’évaluation, remise de
 | Tableau de bord (échéances, événements, documents récents) | ✔ | ✔ | ✔ |
 | Horaire hebdomadaire | le sien | le sien | toute l’école ou celui de n’importe qui |
 | Calendrier (évaluations + événements) | voir | ajouter dans ses cours | ajouter partout, y compris des événements globaux |
-| Documents de cours | voir le PDF dans le navigateur, télécharger | publier, supprimer, **voir qui l’a ouvert et quand** | tout |
+| Documents de cours | voir le PDF dans le navigateur, télécharger (si permis), confirmer la lecture | publier avec **règles de publication**, voir qui a ouvert / confirmé et quand | tout |
 | Plan d’évaluation (pondérations, échéances) | voir | créer, modifier | tout |
 | Remise de travaux | remettre (et remettre à nouveau) | voir les remises, retards, versions | tout |
-| Notes | les siennes, une fois publiées, avec sa moyenne pondérée | saisie, commentaires, publication, relevé et export CSV | tout |
+| Notes | les siennes, une fois publiées, avec moyenne pondérée | saisie, commentaires, publication, relevé, export CSV | tout |
 | Absences | les siennes | prise des présences, bilan | tout |
-| Messagerie | écrire à ses enseignants et à l’administration | écrire à ses étudiants (un à un ou à tout un groupe) et au personnel | écrire à tout le monde |
-| Dossier étudiant | le sien | ses étudiants, limité à ses cours | tous, complets |
-| Comptes (création étudiant, enseignant, admin, désactivation, réinitialisation) | | | ✔ |
-| Gestion des cours, enseignants assignés, inscriptions, horaire | | horaire de ses cours | ✔ |
-| Vue d’ensemble et journal d’activité (connexions, notes, remises, documents consultés…) | | | ✔ |
+| Messagerie | ses enseignants et l’administration | ses étudiants (un à un ou tout un groupe) et le personnel | tout le monde |
+| Dossier étudiant | le sien | ses étudiants, limité à ses cours | tous |
+| Comptes, cours, inscriptions, nom et couleur de l’établissement | | | ✔ |
+| Vue d’ensemble et journal d’activité | | | ✔ |
+
+### Règles de publication des documents (enseignants)
+
+Pour chaque document :
+
+- **Brouillon** : invisible pour les étudiants, jusqu’à ce que l’enseignant le publie.
+- **Publication programmée** : le document apparaît automatiquement à la date choisie.
+- **Disponible jusqu’au** : le document disparaît automatiquement après cette date.
+- **Destinataires** : tout le groupe, ou seulement certains étudiants.
+- **Consultation seulement** : l’étudiant peut ouvrir le PDF dans le site, mais pas le télécharger.
+- **Lecture obligatoire** : l’étudiant doit cliquer « J’ai lu ». L’enseignant voit qui l’a fait et quand.
+- **Avis automatique** : un message est envoyé aux étudiants concernés dès que le document devient visible.
+
+Chaque cours a aussi des **règles par défaut**, appliquées aux nouveaux documents : commencer en brouillon, consultation seulement, lecture obligatoire, avis, durée de disponibilité, catégorie.
 
 ---
 
@@ -37,9 +51,7 @@ npm start
 
 Ouvrez ensuite http://localhost:3000. Pour relancer automatiquement à chaque modification, utilisez `npm run dev`.
 
-### Comptes de démonstration
-
-En local, au premier démarrage avec une base vide, des données de démo sont créées : 3 cours, 2 enseignants, 6 étudiants, des notes, des absences, des documents PDF et des messages. Tous les comptes de démo ont le mot de passe **`demo12345`**.
+Sans `DATABASE_URL`, l’application utilise un fichier SQLite local dans `data/`. Au premier démarrage, des **données de démo** sont créées. Tous les comptes de démo ont le mot de passe `demo12345` :
 
 | Rôle | Courriel |
 |---|---|
@@ -47,123 +59,107 @@ En local, au premier démarrage avec une base vide, des données de démo sont c
 | Enseignant | `prof.tremblay@ecole.test`, `prof.roy@ecole.test` |
 | Étudiant | `etudiant@ecole.test`, `n.cote@ecole.test`, `e.pelletier@ecole.test`… |
 
-- Pour repartir de zéro : `npm run reset` (supprime `data/`), puis `npm start`.
-- Les données de démo ne sont **jamais** créées en production (`NODE_ENV=production`), sauf si `SEED_DEMO=true`.
-
-### Tests
-
-```bash
-npm test
-```
-
-Les tests démarrent un serveur sur une base temporaire. Ils vérifient les permissions de chaque rôle, la remise et la correction des travaux, le suivi des consultations de documents, la messagerie, le calendrier et la protection CSRF.
+- Pour repartir de zéro : `npm run reset`.
+- Pour lancer les tests : `npm test`. La suite complète roule deux fois : contre SQLite local, puis contre le pilote Turso, au moyen d’un faux serveur Turso.
 
 ---
 
-## Déploiement sur Render
+## Déploiement sur Render (plan gratuit, 0 $)
 
-Render héberge l’application comme un **Web Service Node**. Deux points sont essentiels :
+Sur le plan gratuit de Render, le disque est **effacé** à chaque mise en veille (après 15 minutes sans visite), à chaque redémarrage et à chaque déploiement. Cartable garde donc **toutes** ses données dans une base en ligne gratuite, **Turso**, compatible SQLite : comptes, notes, messages, et aussi les fichiers téléversés.
 
-1. **Disque persistant.** La base SQLite et les fichiers téléversés vivent dans `DATA_DIR`. Sans disque, le système de fichiers de Render est effacé à chaque déploiement ou redémarrage, et toutes les données sont perdues. Un disque exige une instance **payante** (Starter, environ 7 $/mois, plus 0,25 $/Go/mois pour le disque).
-2. **Premier administrateur.** En production, il n’y a pas de données de démo. Le premier compte admin est créé à partir de `ADMIN_EMAIL` et `ADMIN_PASSWORD` au premier démarrage. Ensuite, tous les autres comptes se créent depuis l’interface (*Administration → Comptes*).
+### Étape 1 : créer la base de données Turso (gratuite)
 
-### Étape 0 : pousser le code sur GitHub
+1. Allez sur https://turso.tech et créez un compte (connexion GitHub possible). Le plan gratuit ne demande pas de carte de crédit.
+2. Dans le tableau de bord, cliquez sur **Create Database** :
+   - Nom : `cartable`
+   - Région : **AWS us-west-2 (Oregon)**, la même région que le service Render, pour que ce soit rapide.
+3. Ouvrez la base et copiez son **URL**. Elle ressemble à `libsql://cartable-votrenom.turso.io`.
+4. Cliquez sur **Create Token** (accès *Read & Write*, sans expiration) et copiez le **jeton**. Il n’est affiché qu’une seule fois.
 
-Le dépôt doit contenir ce projet à sa racine, avec `package.json`, `server.js` et `render.yaml`.
+<details><summary>Avec l’outil en ligne de commande Turso (facultatif)</summary>
 
 ```bash
-git push origin main
+turso db create cartable --location aws-us-west-2
 ```
+```bash
+turso db show cartable --url
+```
+```bash
+turso db tokens create cartable
+```
+</details>
 
-### Option A : Blueprint (recommandé, tout est préconfiguré)
+Il n’y a rien d’autre à faire : les tables sont créées automatiquement au premier démarrage.
 
-Le fichier [`render.yaml`](render.yaml) décrit le service complet : Node 24, disque de 1 Go monté sur `/var/data`, vérification de santé et variables d’environnement.
+### Étape 2 : créer le service sur Render
+
+**Option A : Blueprint (recommandé).** Le fichier [`render.yaml`](render.yaml) contient déjà toute la configuration.
 
 1. Sur https://dashboard.render.com, choisissez **New → Blueprint**.
-2. Connectez votre compte GitHub, puis choisissez le dépôt (par ex. `tigamer20/cours`) et la branche `main`.
-3. Render lit `render.yaml` et vous demande les deux valeurs secrètes :
-   - `ADMIN_EMAIL` : votre courriel d’administrateur ;
-   - `ADMIN_PASSWORD` : un mot de passe fort (8 caractères minimum).
-4. Cliquez sur **Apply** (ou **Deploy Blueprint**). Le premier déploiement prend 1 à 3 minutes.
-5. Ouvrez l’URL `https://ecole-en-ligne-xxxx.onrender.com` et connectez-vous avec `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
-6. Changez ensuite votre mot de passe dans **Mon profil**. Vous pouvez supprimer `ADMIN_PASSWORD` des variables d’environnement : il ne sert qu’au tout premier démarrage.
+2. Choisissez le dépôt GitHub `tigamer20/cours`, branche `main`.
+3. Render demande quatre valeurs :
 
-### Option B : configuration manuelle
-
-1. Choisissez **New → Web Service**, puis le dépôt GitHub.
-2. Remplissez les champs :
-
-   | Champ | Valeur |
+   | Variable | Valeur |
    |---|---|
-   | Language / Runtime | `Node` |
-   | Branch | `main` |
-   | Root Directory | *(vide, ou le sous-dossier si le projet n’est pas à la racine)* |
-   | Build Command | `npm install` |
-   | Start Command | `npm start` |
-   | Instance Type | **Starter** (requis pour le disque) |
+   | `DATABASE_URL` | l’URL Turso (`libsql://cartable-….turso.io`) |
+   | `DATABASE_TOKEN` | le jeton Turso |
+   | `ADMIN_EMAIL` | votre courriel d’administrateur |
+   | `ADMIN_PASSWORD` | un mot de passe fort (8 caractères minimum) |
 
-3. Sous **Advanced → Add Disk** :
+4. Cliquez sur **Apply**. Le déploiement prend 1 à 3 minutes.
 
-   | Champ | Valeur |
-   |---|---|
-   | Name | `ecole-data` |
-   | Mount Path | `/var/data` |
-   | Size | `1` Go (agrandissable plus tard, jamais réductible) |
+**Option B : configuration manuelle.** Choisissez **New → Web Service**, puis le dépôt GitHub, et remplissez :
 
-4. Sous **Environment → Environment Variables** :
+| Champ | Valeur |
+|---|---|
+| Language | `Node` |
+| Branch | `main` |
+| Region | `Oregon (US West)` |
+| Root Directory | *(vide)* |
+| Build Command | `npm install` |
+| Start Command | `npm start` |
+| Instance Type | **Free** |
+| Health Check Path (sous *Advanced*) | `/api/health` |
 
-   | Clé | Valeur | Rôle |
-   |---|---|---|
-   | `NODE_ENV` | `production` | désactive les données de démo |
-   | `NODE_VERSION` | `24` | version de Node utilisée par Render |
-   | `DATA_DIR` | `/var/data` | **doit correspondre au Mount Path du disque** |
-   | `ADMIN_EMAIL` | votre courriel | premier compte admin |
-   | `ADMIN_PASSWORD` | mot de passe fort | premier compte admin |
-   | `MAX_UPLOAD_MB` | `25` *(optionnel)* | taille maximale d’un fichier téléversé |
+Ensuite, sous **Environment Variables** :
 
-5. Sous **Advanced → Health Check Path**, indiquez `/api/health`.
-6. Cliquez sur **Create Web Service**.
+| Clé | Valeur |
+|---|---|
+| `NODE_ENV` | `production` |
+| `NODE_VERSION` | `24` |
+| `DATABASE_URL` | URL Turso (`libsql://….turso.io`) |
+| `DATABASE_TOKEN` | jeton Turso |
+| `ADMIN_EMAIL` | votre courriel d’administrateur |
+| `ADMIN_PASSWORD` | mot de passe fort |
+| `MAX_UPLOAD_MB` | `15` *(facultatif)* |
 
-> Ne définissez pas `PORT` : Render le fournit lui-même, et le serveur écoute automatiquement sur `process.env.PORT` (adresse `0.0.0.0`).
+> Ne définissez **pas** `PORT` : Render le fournit lui-même.
 
-### Tester gratuitement (plan Free, sans disque)
+### Étape 3 : première connexion
 
-Le plan Free fonctionne pour une démo, avec deux limites :
+1. Ouvrez `https://cartable-xxxx.onrender.com`.
+2. Connectez-vous avec `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
+3. Dans **Administration → Établissement**, entrez le nom de l’école, un slogan et une couleur.
+4. Dans **Comptes**, créez les enseignants et les étudiants. Dans **Gestion des cours**, créez les cours et faites les inscriptions.
+5. Changez votre mot de passe dans **Mon profil**. Vous pouvez ensuite retirer `ADMIN_PASSWORD` de Render : il ne sert qu’au tout premier démarrage.
 
-- **pas de disque** : les données sont effacées à chaque redéploiement, redémarrage ou mise en veille ;
-- le service **s’endort** après 15 minutes d’inactivité, et le premier chargement suivant prend environ 1 minute.
+### Bon à savoir sur le plan gratuit
 
-Configuration pour une démo : instance **Free**, aucun disque, et les variables `NODE_ENV=production`, `NODE_VERSION=24`, `SEED_DEMO=true`. `DATA_DIR` n’est pas nécessaire (le dossier `./data` sera utilisé). Les comptes de démo (`admin@ecole.test` / `demo12345`, etc.) sont alors recréés à chaque démarrage.
-
-⚠️ N’utilisez **jamais** `SEED_DEMO=true` sur un site réel : les mots de passe de démo sont publics dans ce README.
-
-### Nom de domaine personnalisé (optionnel)
-
-Allez dans **Settings → Custom Domains → Add**, puis ajoutez l’enregistrement DNS (CNAME) indiqué par Render chez votre registraire. Le certificat HTTPS est automatique.
-
-### Mises à jour
-
-Chaque `git push` sur `main` redéploie automatiquement (**Auto-Deploy**). Les données restent sur le disque. Le schéma de la base est créé ou complété au démarrage (`CREATE TABLE IF NOT EXISTS`).
-
-> Avec un disque attaché, Render arrête l’ancienne instance avant de démarrer la nouvelle. Le site est donc indisponible quelques secondes pendant un déploiement.
-
-### Sauvegardes
-
-Render prend un **instantané quotidien du disque**, conservé 7 jours. Vous pouvez le restaurer depuis **Disks → Snapshots**. Pour une copie manuelle, ouvrez le **Shell** du service sur Render :
-
-```bash
-cd /var/data && tar czf /tmp/sauvegarde.tgz ecole.db* uploads
-```
+- **Mise en veille** : après 15 minutes sans visite, le service s’endort. La visite suivante prend environ 1 minute à charger, mais aucune donnée n’est perdue, car tout est dans Turso. Pour éviter la veille, un moniteur gratuit (par ex. UptimeRobot) peut appeler `https://votre-app.onrender.com/api/health` toutes les 10 minutes. Une seule application allumée 24 h sur 24 consomme environ 744 h par mois, sous la limite gratuite de 750 h de Render (à vérifier dans votre tableau de bord).
+- **Limites Turso gratuites** (à vérifier sur turso.tech) : 5 Go de stockage, 500 millions de lignes lues et 10 millions de lignes écrites par mois. C’est largement suffisant pour une école ; les fichiers comptent dans les 5 Go.
+- **Taille des fichiers** : 15 Mo par défaut (`MAX_UPLOAD_MB`). L’instance gratuite n’a que 512 Mo de mémoire.
+- **Sauvegardes** : Turso offre une restauration à un moment précis (Point-in-Time Restore, durée limitée sur le plan gratuit). Pour une copie complète : `turso db shell cartable .dump > sauvegarde.sql`.
 
 ### Dépannage
 
 | Symptôme | Cause probable |
 |---|---|
-| Les données disparaissent après un déploiement | Pas de disque, ou `DATA_DIR` différent du *Mount Path* |
-| « Aucun utilisateur : définissez ADMIN_EMAIL… » dans les logs | `ADMIN_EMAIL` / `ADMIN_PASSWORD` absents au premier démarrage : ajoutez-les puis **Manual Deploy → Restart** |
-| `Cannot find module 'node:sqlite'` ou erreur de syntaxe | Mauvaise version de Node : vérifiez `NODE_VERSION=24` |
-| Connexion qui « ne tient pas » | Ouvrez le site en `https://` : les cookies de session sont marqués `Secure` derrière le proxy HTTPS de Render |
-| Échec du health check | Vérifiez que le *Health Check Path* est `/api/health` et lisez les **Logs** |
+| Logs : « ATTENTION : DATABASE_URL absent » | Variables Turso manquantes : les données seront perdues à la prochaine veille. |
+| Logs : `HTTP 401` vers la base | Jeton Turso invalide ou expiré : créez-en un nouveau. |
+| Logs : « Aucun utilisateur : définissez ADMIN_EMAIL… » | Ajoutez `ADMIN_EMAIL` / `ADMIN_PASSWORD`, puis **Manual Deploy → Restart service**. |
+| `Cannot find module 'node:sqlite'` | Vérifiez `NODE_VERSION=24`. |
+| La connexion ne tient pas | Utilisez l’adresse `https://` : les cookies sont `Secure` derrière le proxy de Render. |
 
 ---
 
@@ -171,41 +167,43 @@ cd /var/data && tar czf /tmp/sauvegarde.tgz ecole.db* uploads
 
 | Variable | Défaut | Description |
 |---|---|---|
-| `PORT` | `3000` | Port d’écoute (fourni par Render) |
-| `HOST` | `0.0.0.0` | Adresse d’écoute |
-| `DATA_DIR` | `./data` | Dossier de la base SQLite et des fichiers téléversés |
-| `NODE_ENV` | | `production` désactive les données de démo |
+| `DATABASE_URL` | | URL Turso `libsql://…` ; si absente, SQLite local dans `DATA_DIR` |
+| `DATABASE_TOKEN` | | Jeton d’accès Turso |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | | Premier admin, créé seulement si la base n’a aucun utilisateur |
-| `SEED_DEMO` | | `true` force les données de démo, `false` les empêche en local |
-| `MAX_UPLOAD_MB` | `25` | Taille maximale d’un fichier |
+| `NODE_ENV` | | `production` désactive les données de démo |
+| `SEED_DEMO` | | `true` force les données de démo (jamais sur un vrai site : les mots de passe sont publics) |
+| `MAX_UPLOAD_MB` | `15` | Taille maximale d’un fichier |
+| `PORT`, `HOST` | `3000`, `0.0.0.0` | Fournis par Render |
+| `DATA_DIR` | `./data` | Base locale et cache des fichiers |
 
 ---
 
 ## Structure
 
 ```
-server.js              serveur HTTP, routage, fichiers statiques, en-têtes de sécurité
-src/db.js              schéma SQLite et utilitaires
-src/auth.js            mots de passe (scrypt), sessions, limitation des tentatives de connexion
-src/access.js          règles d’accès (qui peut voir ou gérer quel cours, quel dossier)
-src/files.js           téléversement et envoi des fichiers
-src/seed.js            premier admin et données de démo
-src/routes/users.js    connexion, profil, comptes, contacts
-src/routes/courses.js  cours, inscriptions, horaire, présences
-src/routes/coursework.js  documents, évaluations, notes, remises
-src/routes/general.js  tableau de bord, calendrier, messagerie, dossiers, administration
-public/                interface (index.html, styles.css, app.js, js/*.js)
-test/api.test.js       tests de l’API
-render.yaml            Blueprint Render
+server.js                 serveur HTTP, routage, fichiers statiques, en-têtes de sécurité
+src/db.js                 pilotes de base de données (Turso HTTP / SQLite local), schéma, migrations
+src/auth.js               mots de passe (scrypt), sessions, limitation des tentatives de connexion
+src/access.js             règles d’accès (qui voit / gère quel cours, quel document, quel dossier)
+src/files.js              fichiers stockés en morceaux dans la base, cache local
+src/seed.js               premier admin et données de démo
+src/routes/users.js       connexion, profil, préférences, comptes, paramètres de l’établissement
+src/routes/courses.js     cours, règles par défaut, inscriptions, horaire, présences
+src/routes/coursework.js  documents et règles de publication, évaluations, notes, remises
+src/routes/general.js     tableau de bord, calendrier, messagerie, dossiers, administration
+public/                   interface (index.html, styles.css, app.js, js/*.js)
+test/                     tests de l’API (local + faux serveur Turso)
+render.yaml               Blueprint Render (plan gratuit)
 ```
 
 ## Sécurité
 
 - Les mots de passe sont hachés avec scrypt et un sel aléatoire. Ils ne sont jamais renvoyés par l’API.
-- Les sessions utilisent un cookie `HttpOnly`, `SameSite=Strict` et `Secure` en HTTPS. Seule l’empreinte SHA-256 du jeton est stockée en base, et une session expire après 7 jours.
-- Protection CSRF : toute requête qui modifie des données doit porter l’en-tête `X-Requested-With`, impossible à envoyer depuis un autre site sans autorisation CORS.
-- Après 10 échecs de connexion en 15 minutes (même IP et même courriel), les tentatives sont bloquées.
-- Toutes les requêtes SQL sont paramétrées, et chaque route vérifie le rôle et l’appartenance au cours.
-- Seuls les PDF, les images et le texte s’affichent dans le navigateur. Tout autre fichier (HTML, SVG…) est forcé en téléchargement avec `nosniff` et une CSP `sandbox`, ce qui empêche l’exécution de script.
+- Les sessions utilisent un cookie `HttpOnly`, `SameSite=Strict` et `Secure` en HTTPS. Seule l’empreinte SHA-256 du jeton est stockée, et la session expire après 7 jours.
+- Protection CSRF : toute requête qui modifie des données doit porter l’en-tête `X-Requested-With`.
+- Les tentatives de connexion sont limitées à 10 échecs en 15 minutes (par IP et par courriel).
+- Les requêtes SQL sont paramétrées, et chaque route vérifie le rôle et l’appartenance au cours.
+- Les règles de publication sont appliquées côté serveur. Un brouillon, un document programmé, expiré ou destiné à d’autres étudiants renvoie « introuvable », même si on devine son adresse.
+- Seuls les PDF, les images et le texte s’affichent dans le navigateur. Tout autre fichier est forcé en téléchargement, avec `nosniff` et une CSP `sandbox`.
 - L’interface applique une Content-Security-Policy stricte (`script-src 'self'`), et tout contenu dynamique est échappé.
-- Les actions importantes sont consignées dans un journal d’activité, consultable par les administrateurs.
+- La « consultation seulement » empêche le téléchargement via Cartable. Un étudiant peut quand même faire une capture d’écran ou utiliser l’impression du lecteur PDF : c’est une dissuasion, pas une protection absolue.

@@ -29,21 +29,21 @@ export function validatePassword(password) {
 
 const tokenHash = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
-export function createSession(res, req, userId) {
+export async function createSession(res, req, userId) {
   const token = crypto.randomBytes(32).toString('hex');
   const expires = new Date(Date.now() + SESSION_DAYS * 86400_000);
-  run('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)', tokenHash(token), userId, expires.toISOString());
+  await run('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)', tokenHash(token), userId, expires.toISOString());
   setCookie(res, req, token, SESSION_DAYS * 86400);
 }
 
-export function destroySession(req, res) {
+export async function destroySession(req, res) {
   const token = parseCookies(req.headers.cookie)[COOKIE];
-  if (token) run('DELETE FROM sessions WHERE token = ?', tokenHash(token));
+  if (token) await run('DELETE FROM sessions WHERE token = ?', tokenHash(token));
   setCookie(res, req, '', 0);
 }
 
 export function destroyUserSessions(userId) {
-  run('DELETE FROM sessions WHERE user_id = ?', userId);
+  return run('DELETE FROM sessions WHERE user_id = ?', userId);
 }
 
 function setCookie(res, req, value, maxAge) {
@@ -52,22 +52,28 @@ function setCookie(res, req, value, maxAge) {
   res.setHeader('Set-Cookie', parts.join('; '));
 }
 
-export function userFromRequest(req) {
+export async function userFromRequest(req) {
   const token = parseCookies(req.headers.cookie)[COOKIE];
   if (!token) return null;
-  const user = one(
-    `SELECT u.id, u.email, u.role, u.first_name, u.last_name, u.student_number, u.program, u.phone, u.active
+  const user = await one(
+    `SELECT u.id, u.email, u.role, u.first_name, u.last_name, u.student_number, u.program, u.phone, u.active, u.preferences
        FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.token = ? AND s.expires_at > ?`,
     tokenHash(token),
     new Date().toISOString(),
   );
   if (!user || !user.active) return null;
-  return { ...user };
+  let preferences = {};
+  try {
+    preferences = JSON.parse(user.preferences || '{}');
+  } catch {
+    /* ignore */
+  }
+  return { ...user, preferences };
 }
 
 export function purgeExpiredSessions() {
-  run('DELETE FROM sessions WHERE expires_at <= ?', new Date().toISOString());
+  return run('DELETE FROM sessions WHERE expires_at <= ?', new Date().toISOString());
 }
 
 // --- Brute-force protection on login (in memory, per IP + email) -------------

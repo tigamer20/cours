@@ -1,8 +1,6 @@
-import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
-import { UPLOAD_DIR, one, run, transaction } from './db.js';
+import { one, run, batch } from './db.js';
 import { hashPassword } from './auth.js';
+import { storeFile } from './files.js';
 
 /** Demo password shared by every demo account (see README). */
 export const DEMO_PASSWORD = 'demo12345';
@@ -12,29 +10,29 @@ export const DEMO_PASSWORD = 'demo12345';
  *  - ADMIN_EMAIL + ADMIN_PASSWORD set → creates that first admin (production / Render).
  *  - otherwise, outside production (or with SEED_DEMO=true) → loads demo data.
  */
-export function bootstrap() {
-  if (one('SELECT COUNT(*) AS n FROM users').n > 0) return;
+export async function bootstrap() {
+  if ((await one('SELECT COUNT(*) AS n FROM users')).n > 0) return;
 
   const { ADMIN_EMAIL, ADMIN_PASSWORD, NODE_ENV, SEED_DEMO } = process.env;
   if (SEED_DEMO === 'true' || (NODE_ENV !== 'production' && SEED_DEMO !== 'false' && !ADMIN_EMAIL)) {
-    seedDemo();
-    console.log(`Données de démonstration créées (mot de passe : voir README).`);
+    await seedDemo();
+    console.log('Données de démonstration créées (mot de passe : voir README).');
   }
   if (ADMIN_EMAIL && ADMIN_PASSWORD) {
     if (ADMIN_PASSWORD.length < 8) throw new Error('ADMIN_PASSWORD doit contenir au moins 8 caractères.');
-    run(
+    await run(
       "INSERT OR IGNORE INTO users (email, password_hash, role, first_name, last_name) VALUES (?, ?, 'admin', 'Admin', 'Principal')",
       ADMIN_EMAIL.toLowerCase(),
       hashPassword(ADMIN_PASSWORD),
     );
     console.log(`Compte administrateur initial créé : ${ADMIN_EMAIL}`);
   }
-  if (one('SELECT COUNT(*) AS n FROM users').n === 0) {
+  if ((await one('SELECT COUNT(*) AS n FROM users')).n === 0) {
     console.warn('Aucun utilisateur : définissez ADMIN_EMAIL et ADMIN_PASSWORD puis redémarrez.');
   }
 }
 
-/** Builds a tiny one-page PDF so the demo has a document to open. */
+/** Builds a tiny one-page PDF so the demo has documents to open. */
 function samplePdf(title, lines) {
   const esc = (s) => s.replace(/[\\()]/g, (c) => '\\' + c);
   const text = [`BT /F1 20 Tf 72 740 Td (${esc(title)}) Tj ET`]
@@ -60,16 +58,7 @@ function samplePdf(title, lines) {
   return Buffer.from(pdf, 'latin1');
 }
 
-function storeFile(name, mime, data, userId) {
-  const stored = crypto.randomBytes(16).toString('hex');
-  fs.writeFileSync(path.join(UPLOAD_DIR, stored), data);
-  return Number(
-    run('INSERT INTO files (original_name, stored_name, mime, size, uploaded_by) VALUES (?, ?, ?, ?, ?)', name, stored, mime, data.length, userId)
-      .lastInsertRowid,
-  );
-}
-
-function seedDemo() {
+async function seedDemo() {
   const pw = hashPassword(DEMO_PASSWORD);
   const day = 86400_000;
   const at = (days, hour = 23, minute = 59) => {
@@ -78,117 +67,131 @@ function seedDemo() {
     return d.toISOString();
   };
   const isoDate = (days) => new Date(Date.now() + days * day).toISOString().slice(0, 10);
+  const S = []; // statements, executed in one atomic batch (one round trip to the online database)
+  const q = (sql, ...params) => S.push([sql, params]);
 
-  transaction(() => {
-    const user = (email, role, first, last, extra = {}) =>
-      Number(
-        run(
-          'INSERT INTO users (email, password_hash, role, first_name, last_name, student_number, program) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          email, pw, role, first, last, extra.number ?? null, extra.program ?? null,
-        ).lastInsertRowid,
-      );
+  q("INSERT OR REPLACE INTO settings (key, value) VALUES ('school_name', 'Cégep de démonstration')");
+  q("INSERT OR REPLACE INTO settings (key, value) VALUES ('tagline', 'Votre session, au même endroit.')");
 
-    const admin = user('admin@ecole.test', 'admin', 'Alexandra', 'Gagnon');
-    const prof1 = user('prof.tremblay@ecole.test', 'enseignant', 'Marc', 'Tremblay');
-    const prof2 = user('prof.roy@ecole.test', 'enseignant', 'Julie', 'Roy');
-    const students = [
-      ['etudiant@ecole.test', 'Léa', 'Bouchard'],
-      ['n.cote@ecole.test', 'Nathan', 'Côté'],
-      ['e.pelletier@ecole.test', 'Emma', 'Pelletier'],
-      ['l.morin@ecole.test', 'Liam', 'Morin'],
-      ['c.lavoie@ecole.test', 'Chloé', 'Lavoie'],
-      ['t.fortin@ecole.test', 'Thomas', 'Fortin'],
-    ].map(([email, first, last], i) =>
-      user(email, 'etudiant', first, last, { number: `2026${String(1001 + i)}`, program: 'Techniques de l’informatique' }),
-    );
-
-    const course = (code, name, teacher, desc) =>
-      Number(
-        run('INSERT INTO courses (code, name, group_name, term, description, teacher_id) VALUES (?, ?, ?, ?, ?, ?)', code, name, '01', 'Automne 2026', desc, teacher)
-          .lastInsertRowid,
-      );
-    const c1 = course('420-316-SH', 'Structures de données dans les jeux', prof1, 'Vecteurs, listes, piles, files, arbres et tables de hachage appliqués au jeu vidéo.');
-    const c2 = course('420-4219-SH', 'Développement Web', prof2, 'HTML, CSS, JavaScript et PHP : conception de sites responsives.');
-    const c3 = course('201-103-SH', 'Mathématiques appliquées', prof1, 'Algèbre linéaire et géométrie pour la programmation.');
-
-    for (const s of students) {
-      run('INSERT INTO enrollments VALUES (?, ?)', c1, s);
-      run('INSERT INTO enrollments VALUES (?, ?)', c2, s);
-    }
-    for (const s of students.slice(0, 4)) run('INSERT INTO enrollments VALUES (?, ?)', c3, s);
-
-    const slot = (c, d, s, e, room) => run('INSERT INTO schedule_slots (course_id, day, start_time, end_time, room) VALUES (?, ?, ?, ?, ?)', c, d, s, e, room);
-    slot(c1, 1, '08:00', '10:00', 'B-204');
-    slot(c1, 3, '13:00', '16:00', 'Lab C-110');
-    slot(c2, 2, '10:00', '12:00', 'A-301');
-    slot(c2, 4, '13:00', '16:00', 'Lab C-112');
-    slot(c3, 5, '09:00', '11:00', 'B-108');
-
-    const evaluation = (c, title, kind, weight, due, opts = {}) =>
-      Number(
-        run(
-          `INSERT INTO evaluations (course_id, title, kind, weight, max_score, due_at, description, accepts_submissions, grades_published)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          c, title, kind, weight, opts.max ?? 100, due, opts.desc ?? '', opts.submit ? 1 : 0, opts.published ? 1 : 0,
-        ).lastInsertRowid,
-      );
-    const e1 = evaluation(c1, 'Lab 1 — Vecteur', 'laboratoire', 10, at(-20), { submit: true, published: true, desc: 'Implémenter une classe vecteur dynamique.' });
-    const e2 = evaluation(c1, 'Lab 2 — Whac-a-mole', 'laboratoire', 10, at(-6), { submit: true, published: true });
-    evaluation(c1, 'Examen intra', 'examen', 25, at(5, 8, 0));
-    evaluation(c1, 'Lab 3 — Liste chaînée', 'laboratoire', 15, at(9), { submit: true, desc: 'Voir l’énoncé dans les documents du cours.' });
-    evaluation(c1, 'Projet final', 'projet', 40, at(55), { submit: true });
-    const w1 = evaluation(c2, 'TP1 — Page responsive', 'travail', 15, at(-12), { submit: true, published: true });
-    evaluation(c2, 'Quiz CSS', 'quiz', 10, at(3, 10, 0), { max: 20 });
-    evaluation(c2, 'TP2 — Intro PHP', 'travail', 20, at(12), { submit: true });
-    evaluation(c2, 'Examen final', 'examen', 55, at(60, 13, 0));
-    evaluation(c3, 'Devoir 1 — Matrices', 'travail', 20, at(7), { submit: true });
-    evaluation(c3, 'Examen 1', 'examen', 30, at(14, 9, 0));
-    evaluation(c3, 'Examen final', 'examen', 50, at(58, 9, 0));
-
-    const scores = [[88, 92], [74, 80], [95, 97], [61, 70], [82, 77], [90, 85]];
-    students.forEach((s, i) => {
-      run('INSERT INTO grades (evaluation_id, student_id, score, comment) VALUES (?, ?, ?, ?)', e1, s, scores[i][0], i === 3 ? 'Revoir la gestion de la mémoire.' : 'Bon travail.');
-      run('INSERT INTO grades (evaluation_id, student_id, score, comment) VALUES (?, ?, ?, ?)', e2, s, scores[i][1], '');
-      run('INSERT INTO grades (evaluation_id, student_id, score, comment) VALUES (?, ?, ?, ?)', w1, s, 70 + ((i * 7) % 28), '');
-    });
-
-    const planFile = storeFile('plan-de-cours-420-316.pdf', 'application/pdf', samplePdf('Plan de cours - 420-316-SH', [
-      'Structures de donnees dans les jeux - Automne 2026',
-      'Enseignant : Marc Tremblay',
-      'Evaluations : Labs 35 %, Examen intra 25 %, Projet final 40 %',
-      'Les travaux sont remis sur la plateforme avant 23 h 59.',
-    ]), prof1);
-    const lab3File = storeFile('enonce-lab3-liste-chainee.pdf', 'application/pdf', samplePdf('Lab 3 - Liste chainee', [
-      'Implementer une liste doublement chainee generique.',
-      'Methodes : push_front, push_back, insert, erase, iterateurs.',
-      'Remettre le projet Visual Studio compresse (.zip).',
-    ]), prof1);
-    const webFile = storeFile('notes-flexbox.pdf', 'application/pdf', samplePdf('Notes de cours - Flexbox et Grid', [
-      'display: flex; justify-content; align-items; gap',
-      'display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr))',
-    ]), prof2);
-    const d1 = Number(run('INSERT INTO documents (course_id, title, description, file_id, posted_by) VALUES (?, ?, ?, ?, ?)', c1, 'Plan de cours', 'Plan de cours officiel de la session.', planFile, prof1).lastInsertRowid);
-    run('INSERT INTO documents (course_id, title, description, file_id, posted_by) VALUES (?, ?, ?, ?, ?)', c1, 'Énoncé — Lab 3', 'Liste chaînée générique.', lab3File, prof1);
-    run('INSERT INTO documents (course_id, title, description, file_id, posted_by) VALUES (?, ?, ?, ?, ?)', c2, 'Notes — Flexbox et Grid', '', webFile, prof2);
-    for (const s of students.slice(0, 4)) {
-      run('INSERT INTO document_views (document_id, student_id, view_count, downloaded) VALUES (?, ?, ?, ?)', d1, s, 1 + (s % 3), s % 2);
-    }
-
-    for (const [offset, absent] of [[-14, [3]], [-7, [3, 5]], [-2, [1]]]) {
-      for (const s of students) {
-        const status = absent.includes(students.indexOf(s)) ? 'absent' : students.indexOf(s) === 4 && offset === -7 ? 'retard' : 'present';
-        run('INSERT INTO attendance (course_id, student_id, date, status) VALUES (?, ?, ?, ?)', c1, s, isoDate(offset), status);
-      }
-    }
-
-    run('INSERT INTO events (course_id, title, description, starts_at, ends_at, created_by) VALUES (NULL, ?, ?, ?, ?, ?)', 'Journée pédagogique', 'Aucun cours.', at(10, 8, 0), at(10, 17, 0), admin);
-    run('INSERT INTO events (course_id, title, description, starts_at, ends_at, created_by) VALUES (?, ?, ?, ?, ?, ?)', c1, 'Période de questions — intra', 'Local B-204', at(4, 15, 0), at(4, 16, 0), prof1);
-    run('INSERT INTO events (course_id, title, description, starts_at, ends_at, created_by) VALUES (?, ?, ?, ?, ?, ?)', c2, 'Conférence UX', 'Agora', at(8, 12, 0), at(8, 13, 0), prof2);
-
-    run('INSERT INTO messages (sender_id, recipient_id, subject, body) VALUES (?, ?, ?, ?)', prof1, students[0], 'Bienvenue dans le cours', 'Bonjour Léa,\n\nLe plan de cours est disponible dans l’onglet Documents.\n\nMarc Tremblay');
-    run('INSERT INTO messages (sender_id, recipient_id, subject, body) VALUES (?, ?, ?, ?)', students[0], prof1, 'Question sur le lab 3', 'Bonjour, est-ce que les itérateurs inverses sont obligatoires?');
-    run('INSERT INTO messages (sender_id, recipient_id, subject, body) VALUES (?, ?, ?, ?)', admin, prof1, 'Saisie des notes', 'Rappel : les notes de mi-session doivent être saisies avant la fin du mois.');
-
-    run("INSERT INTO audit_log (user_id, action, details) VALUES (?, 'données de démonstration', 'Base initialisée')", admin);
+  // Users — explicit ids so the whole demo fits in one batch.
+  const ADMIN = 1, PROF1 = 2, PROF2 = 3;
+  const user = (id, email, role, first, last, number = null, program = null) =>
+    q('INSERT INTO users (id, email, password_hash, role, first_name, last_name, student_number, program) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, email, pw, role, first, last, number, program);
+  user(ADMIN, 'admin@ecole.test', 'admin', 'Alexandra', 'Gagnon');
+  user(PROF1, 'prof.tremblay@ecole.test', 'enseignant', 'Marc', 'Tremblay');
+  user(PROF2, 'prof.roy@ecole.test', 'enseignant', 'Julie', 'Roy');
+  const students = [
+    ['etudiant@ecole.test', 'Léa', 'Bouchard'],
+    ['n.cote@ecole.test', 'Nathan', 'Côté'],
+    ['e.pelletier@ecole.test', 'Emma', 'Pelletier'],
+    ['l.morin@ecole.test', 'Liam', 'Morin'],
+    ['c.lavoie@ecole.test', 'Chloé', 'Lavoie'],
+    ['t.fortin@ecole.test', 'Thomas', 'Fortin'],
+  ].map(([email, first, last], i) => {
+    const id = 10 + i;
+    user(id, email, 'etudiant', first, last, `2026${1001 + i}`, 'Techniques de l’informatique');
+    return id;
   });
+
+  const C1 = 1, C2 = 2, C3 = 3;
+  const rules = JSON.stringify({ allow_download: true, require_ack: false, notify: true });
+  q('INSERT INTO courses (id, code, name, group_name, term, description, teacher_id, color, document_rules) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', C1, '420-316-SH', 'Structures de données dans les jeux', '01', 'Automne 2026', 'Vecteurs, listes, piles, files, arbres et tables de hachage appliqués au jeu vidéo.', PROF1, '#6366f1', rules);
+  q('INSERT INTO courses (id, code, name, group_name, term, description, teacher_id, color, document_rules) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', C2, '420-4219-SH', 'Développement Web', '01', 'Automne 2026', 'HTML, CSS, JavaScript et PHP : conception de sites responsives.', PROF2, '#0ea5e9', '{}');
+  q('INSERT INTO courses (id, code, name, group_name, term, description, teacher_id, color, document_rules) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', C3, '201-103-SH', 'Mathématiques appliquées', '01', 'Automne 2026', 'Algèbre linéaire et géométrie pour la programmation.', PROF1, '#f59e0b', '{}');
+
+  for (const s of students) {
+    q('INSERT INTO enrollments VALUES (?, ?)', C1, s);
+    q('INSERT INTO enrollments VALUES (?, ?)', C2, s);
+  }
+  for (const s of students.slice(0, 4)) q('INSERT INTO enrollments VALUES (?, ?)', C3, s);
+
+  const slot = (c, d, s, e, room) => q('INSERT INTO schedule_slots (course_id, day, start_time, end_time, room) VALUES (?, ?, ?, ?, ?)', c, d, s, e, room);
+  slot(C1, 1, '08:00', '10:00', 'B-204');
+  slot(C1, 3, '13:00', '16:00', 'Lab C-110');
+  slot(C2, 2, '10:00', '12:00', 'A-301');
+  slot(C2, 4, '13:00', '16:00', 'Lab C-112');
+  slot(C3, 5, '09:00', '11:00', 'B-108');
+
+  let evalId = 0;
+  const evaluation = (c, title, kind, weight, due, opts = {}) => {
+    evalId += 1;
+    q(
+      `INSERT INTO evaluations (id, course_id, title, kind, weight, max_score, due_at, description, accepts_submissions, grades_published)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      evalId, c, title, kind, weight, opts.max ?? 100, due, opts.desc ?? '', opts.submit ? 1 : 0, opts.published ? 1 : 0,
+    );
+    return evalId;
+  };
+  const e1 = evaluation(C1, 'Lab 1 — Vecteur', 'laboratoire', 10, at(-20), { submit: true, published: true, desc: 'Implémenter une classe vecteur dynamique.' });
+  const e2 = evaluation(C1, 'Lab 2 — Whac-a-mole', 'laboratoire', 10, at(-6), { submit: true, published: true });
+  evaluation(C1, 'Examen intra', 'examen', 25, at(5, 8, 0));
+  evaluation(C1, 'Lab 3 — Liste chaînée', 'laboratoire', 15, at(9), { submit: true, desc: 'Voir l’énoncé dans les documents du cours.' });
+  evaluation(C1, 'Projet final', 'projet', 40, at(55), { submit: true });
+  const w1 = evaluation(C2, 'TP1 — Page responsive', 'travail', 15, at(-12), { submit: true, published: true });
+  evaluation(C2, 'Quiz CSS', 'quiz', 10, at(3, 10, 0), { max: 20 });
+  evaluation(C2, 'TP2 — Intro PHP', 'travail', 20, at(12), { submit: true });
+  evaluation(C2, 'Examen final', 'examen', 55, at(60, 13, 0));
+  evaluation(C3, 'Devoir 1 — Matrices', 'travail', 20, at(7), { submit: true });
+  evaluation(C3, 'Examen 1', 'examen', 30, at(14, 9, 0));
+  evaluation(C3, 'Examen final', 'examen', 50, at(58, 9, 0));
+
+  const scores = [[88, 92], [74, 80], [95, 97], [61, 70], [82, 77], [90, 85]];
+  students.forEach((s, i) => {
+    q('INSERT INTO grades (evaluation_id, student_id, score, comment) VALUES (?, ?, ?, ?)', e1, s, scores[i][0], i === 3 ? 'Revoir la gestion de la mémoire.' : 'Bon travail.');
+    q('INSERT INTO grades (evaluation_id, student_id, score, comment) VALUES (?, ?, ?, ?)', e2, s, scores[i][1], '');
+    q('INSERT INTO grades (evaluation_id, student_id, score, comment) VALUES (?, ?, ?, ?)', w1, s, 70 + ((i * 7) % 28), '');
+  });
+
+  for (const [offset, absent] of [[-14, [3]], [-7, [3, 5]], [-2, [1]]]) {
+    students.forEach((s, i) => {
+      const status = absent.includes(i) ? 'absent' : i === 4 && offset === -7 ? 'retard' : 'present';
+      q('INSERT INTO attendance (course_id, student_id, date, status) VALUES (?, ?, ?, ?)', C1, s, isoDate(offset), status);
+    });
+  }
+
+  q('INSERT INTO events (course_id, title, description, starts_at, ends_at, created_by) VALUES (NULL, ?, ?, ?, ?, ?)', 'Journée pédagogique', 'Aucun cours.', at(10, 8, 0), at(10, 17, 0), ADMIN);
+  q('INSERT INTO events (course_id, title, description, starts_at, ends_at, created_by) VALUES (?, ?, ?, ?, ?, ?)', C1, 'Période de questions — intra', 'Local B-204', at(4, 15, 0), at(4, 16, 0), PROF1);
+  q('INSERT INTO events (course_id, title, description, starts_at, ends_at, created_by) VALUES (?, ?, ?, ?, ?, ?)', C2, 'Conférence UX', 'Agora', at(8, 12, 0), at(8, 13, 0), PROF2);
+
+  q('INSERT INTO messages (sender_id, recipient_id, subject, body) VALUES (?, ?, ?, ?)', PROF1, students[0], 'Bienvenue dans le cours', 'Bonjour Léa,\n\nLe plan de cours est disponible dans l’onglet Documents.\n\nMarc Tremblay');
+  q('INSERT INTO messages (sender_id, recipient_id, subject, body) VALUES (?, ?, ?, ?)', students[0], PROF1, 'Question sur le lab 3', 'Bonjour, est-ce que les itérateurs inverses sont obligatoires?');
+  q('INSERT INTO messages (sender_id, recipient_id, subject, body) VALUES (?, ?, ?, ?)', ADMIN, PROF1, 'Saisie des notes', 'Rappel : les notes de mi-session doivent être saisies avant la fin du mois.');
+  q("INSERT INTO audit_log (user_id, action, details) VALUES (?, 'données de démonstration', 'Base initialisée')", ADMIN);
+
+  await batch(S);
+
+  // Documents (files are stored in chunks, outside the batch above).
+  const plan = await storeFile('plan-de-cours-420-316.pdf', samplePdf('Plan de cours - 420-316-SH', [
+    'Structures de donnees dans les jeux - Automne 2026',
+    'Enseignant : Marc Tremblay',
+    'Evaluations : Labs 35 %, Examen intra 25 %, Projet final 40 %',
+    'Les travaux sont remis sur Cartable avant 23 h 59.',
+  ]), PROF1);
+  const lab3 = await storeFile('enonce-lab3-liste-chainee.pdf', samplePdf('Lab 3 - Liste chainee', [
+    'Implementer une liste doublement chainee generique.',
+    'Methodes : push_front, push_back, insert, erase, iterateurs.',
+    'Remettre le projet Visual Studio compresse (.zip).',
+  ]), PROF1);
+  const corr = await storeFile('corrige-lab2.pdf', samplePdf('Corrige - Lab 2', ['Solution commentee du lab 2.']), PROF1);
+  const flex = await storeFile('notes-flexbox.pdf', samplePdf('Notes de cours - Flexbox et Grid', [
+    'display: flex; justify-content; align-items; gap',
+    'display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr))',
+  ]), PROF2);
+
+  const D = [];
+  const doc = (id, course, title, desc, category, file, by, rules = {}) =>
+    D.push([
+      `INSERT INTO documents (id, course_id, title, description, category, file_id, posted_by, status, publish_at, available_until, allow_download, require_ack, notify)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, course, title, desc, category, file, by, rules.status ?? 'published', rules.publish_at ?? null, rules.available_until ?? null,
+        rules.allow_download ?? 1, rules.require_ack ?? 0, 0],
+    ]);
+  doc(1, C1, 'Plan de cours', 'Plan de cours officiel de la session. Lecture obligatoire.', 'Informations', plan, PROF1, { require_ack: 1 });
+  doc(2, C1, 'Énoncé — Lab 3', 'Liste chaînée générique.', 'Laboratoires', lab3, PROF1);
+  doc(3, C1, 'Corrigé — Lab 2', 'Consultation seulement, publié après la remise.', 'Laboratoires', corr, PROF1, { allow_download: 0, publish_at: at(2, 8, 0) });
+  doc(4, C2, 'Notes — Flexbox et Grid', '', 'Semaine 3', flex, PROF2);
+  [10, 11, 12, 13].forEach((s, i) =>
+    D.push(['INSERT INTO document_views (document_id, student_id, first_viewed_at, last_viewed_at, view_count, downloaded, acknowledged_at) VALUES (1, ?, datetime(\'now\'), datetime(\'now\'), ?, ?, ?)', [s, 1 + (i % 3), i % 2, i < 2 ? new Date().toISOString() : null]]),
+  );
+  await batch(D);
 }

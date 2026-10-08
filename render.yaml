@@ -1,12 +1,12 @@
 # Blueprint Render : https://render.com/docs/blueprint-spec
 # Dashboard Render → New → Blueprint → choisir ce dépôt. Voir README.md, section « Déploiement sur Render ».
+# Plan gratuit : le disque est effacé à chaque mise en veille / redéploiement, donc TOUTES les données
+# (comptes, notes, fichiers…) sont stockées dans la base en ligne Turso (gratuite) : DATABASE_URL + DATABASE_TOKEN.
 services:
   - type: web
-    name: ecole-en-ligne
+    name: cartable
     runtime: node
-    # Un disque persistant exige une instance payante (Starter ou plus).
-    # Sur le plan Free, il n'y a pas de disque : la base et les fichiers sont effacés à chaque redéploiement/redémarrage.
-    plan: starter
+    plan: free
     region: oregon
     buildCommand: npm install
     startCommand: npm start
@@ -17,16 +17,15 @@ services:
         value: production
       - key: NODE_VERSION
         value: "24"
-      - key: DATA_DIR
-        value: /var/data
       - key: MAX_UPLOAD_MB
-        value: "25"
-      # Premier compte administrateur, créé au premier démarrage (base vide). Render vous demandera les valeurs.
+        value: "15"
+      # Base de données Turso (libsql://….turso.io) et son jeton — Render vous demandera les valeurs.
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_TOKEN
+        sync: false
+      # Premier compte administrateur, créé au premier démarrage (base vide).
       - key: ADMIN_EMAIL
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
-    disk:
-      name: ecole-data
-      mountPath: /var/data
-      sizeGB: 1
