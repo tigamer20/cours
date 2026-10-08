@@ -6,6 +6,7 @@ import { dashboardPage, profilePage } from './js/home.js';
 import { coursesPage, coursePage, gradingPage } from './js/course.js';
 import { schedulePage, calendarPage, messagesPage, messagePage, studentsPage, dossierPage, composeMessage } from './js/pages.js';
 import { adminOverviewPage, adminUsersPage, adminCoursesPage, auditPage, schoolSettingsPage } from './js/admin.js';
+import { bulletinsPage, adminTermPage, bulletinPage } from './js/reports.js';
 
 applyCachedPreferences();
 
@@ -27,6 +28,9 @@ const ROUTES = [
   [/^\/admin\/cours$/, adminCoursesPage, ['admin']],
   [/^\/admin\/journal$/, auditPage, ['admin']],
   [/^\/admin\/etablissement$/, schoolSettingsPage, ['admin']],
+  [/^\/bulletins$/, bulletinsPage],
+  [/^\/bulletins\/([^/]+)$/, (el, [term]) => adminTermPage(el, decodeURIComponent(term)), ['admin']],
+  [/^\/bulletins\/([^/]+)\/(\d+|tous)$/, (el, [term, who]) => bulletinPage(el, decodeURIComponent(term), who)],
   [/^\/profil(?:\/(\w+))?$/, (el, [section]) => profilePage(el, section)],
 ];
 
@@ -40,6 +44,7 @@ function navItems(role) {
   ];
   if (role === 'etudiant') items.push(['#/notes', 'Mes notes et dossier', 'award']);
   if (role !== 'etudiant') items.push(['#/etudiants', 'Dossiers étudiants', 'users']);
+  items.push(['#/bulletins', 'Bulletins', 'report']);
   const admin = role === 'admin'
     ? [
         ['#/admin', 'Vue d’ensemble', 'grid'],

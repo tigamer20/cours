@@ -359,4 +359,54 @@ test(`${label} — suppression d’un compte étudiant par l’admin`, async () 
   assert.equal((await admin.req('DELETE', `/api/users/${created.id}`, { confirm_email: email })).status, 404);
   assert.ok((await admin.get('/api/admin/audit?q=compte%20%C3%A9tudiant%20supprim%C3%A9')).data.length >= 1);
 });
+
+test(`${label} — bulletins : finalisation par l’enseignant, publication par l’admin`, async () => {
+  const term = encodeURIComponent('Automne 2026');
+  const me = (await student.get('/api/me')).data;
+  const outsiderMe = (await outsider.get('/api/me')).data;
+
+  // Nothing visible to students before publication.
+  assert.deepEqual((await student.get('/api/reports')).data, []);
+  assert.equal((await student.get(`/api/reports/${term}/students/${me.id}`)).status, 404);
+
+  // Teacher fills in the course sheet: computed grade, override, comment, finalization.
+  const sheet = (await prof.get('/api/courses/1/report')).data;
+  const mine = sheet.students.find((s) => s.id === me.id);
+  assert.ok(mine.computed_average !== null, 'moyenne calculée à partir des notes');
+  assert.equal((await otherProf.req('PUT', '/api/courses/1/report', { entries: [] })).status, 403);
+  assert.equal((await prof.req('PUT', '/api/courses/1/report', { entries: [{ student_id: me.id, final_grade: 140 }] })).status, 400);
+  assert.equal(
+    (await prof.req('PUT', '/api/courses/1/report', { entries: [{ student_id: me.id, final_grade: 77, comment: 'Excellente session.' }], finalize: true })).status,
+    200,
+  );
+
+  const overview = (await admin.get(`/api/reports/${term}`)).data;
+  assert.equal(overview.courses.find((c) => c.id === 1).results_final, 1);
+  assert.ok(overview.students.some((s) => s.id === me.id));
+  assert.equal((await prof.get(`/api/reports/${term}`)).status, 403);
+  assert.equal((await student.req('PUT', `/api/reports/${term}`, { published: true })).status, 403);
+
+  // Teacher preview is limited to their own courses.
+  const preview = (await prof.get(`/api/reports/${term}/students/${me.id}`)).data;
+  assert.equal(preview.partial, true);
+  assert.deepEqual(preview.courses.map((c) => c.course_id).sort(), [1, 3]);
+
+  // Publication: students are notified and can read their own report card only.
+  assert.equal((await admin.req('PUT', `/api/reports/${term}`, { published: true, message: 'Bonnes vacances!' })).status, 200);
+  assert.ok((await student.get('/api/messages')).data.some((m) => m.subject === 'Bulletin disponible — Automne 2026'));
+  assert.deepEqual((await student.get('/api/reports')).data.map((t) => t.term), ['Automne 2026']);
+  const bulletin = (await student.get(`/api/reports/${term}/students/${me.id}`)).data;
+  assert.equal(bulletin.message, 'Bonnes vacances!');
+  const line = bulletin.courses.find((c) => c.course_id === 1);
+  assert.equal(line.final_grade, 77);
+  assert.equal(line.comment, 'Excellente session.');
+  assert.equal(line.passed, true);
+  assert.equal(bulletin.courses.length, 3);
+  assert.equal((await student.get(`/api/reports/${term}/students/${outsiderMe.id}`)).status, 403);
+
+  // Once published, teachers can no longer change results.
+  assert.equal((await prof.req('PUT', '/api/courses/1/report', { entries: [{ student_id: me.id, final_grade: 90 }] })).status, 400);
+  assert.ok((await admin.get(`/api/reports/${term}/all`)).data.length >= 6);
+  assert.equal((await student.get(`/api/reports/${term}/all`)).status, 403);
+});
 }

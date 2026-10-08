@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS courses (
   description TEXT NOT NULL DEFAULT '',
   color TEXT,
   document_rules TEXT NOT NULL DEFAULT '{}',
+  results_final INTEGER NOT NULL DEFAULT 0,
+  results_final_at TEXT,
   teacher_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (code, group_name, term)
@@ -194,6 +196,23 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS report_entries (
+  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  final_grade REAL,
+  comment TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (course_id, student_id)
+);
+
+CREATE TABLE IF NOT EXISTS report_terms (
+  term TEXT PRIMARY KEY,
+  published INTEGER NOT NULL DEFAULT 0,
+  published_at TEXT,
+  published_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  message TEXT NOT NULL DEFAULT ''
+);
+
 CREATE INDEX IF NOT EXISTS idx_enrollments_student ON enrollments(student_id);
 CREATE INDEX IF NOT EXISTS idx_messages_recipient ON messages(recipient_id);
 CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
@@ -209,6 +228,8 @@ const MIGRATIONS = [
   ['users', 'preferences', "TEXT NOT NULL DEFAULT '{}'"],
   ['courses', 'color', 'TEXT'],
   ['courses', 'document_rules', "TEXT NOT NULL DEFAULT '{}'"],
+  ['courses', 'results_final', 'INTEGER NOT NULL DEFAULT 0'],
+  ['courses', 'results_final_at', 'TEXT'],
   ['files', 'chunks', 'INTEGER NOT NULL DEFAULT 0'],
   ['documents', 'category', "TEXT NOT NULL DEFAULT ''"],
   ['documents', 'status', "TEXT NOT NULL DEFAULT 'published'"],

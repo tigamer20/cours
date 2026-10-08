@@ -11,6 +11,7 @@ import registerUsers from './src/routes/users.js';
 import registerCourses from './src/routes/courses.js';
 import registerCoursework from './src/routes/coursework.js';
 import registerGeneral from './src/routes/general.js';
+import registerReports from './src/routes/reports.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -23,6 +24,7 @@ registerUsers(router);
 registerCourses(router);
 registerCoursework(router);
 registerGeneral(router);
+registerReports(router);
 
 const STATIC_TYPES = {
   '.html': 'text/html; charset=utf-8',
